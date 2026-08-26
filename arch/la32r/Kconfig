@@ -24,6 +24,15 @@ config CPUSTC_L2_CACHE
 	  Enable selector-2 CACOP maintenance for CPUSTCore implementations
 	  with the unified L2 cache. Disable this for L1-only CPUSTCore builds.
 
+config CPUSTC_OHCI_DMA_NO_POST_INVALIDATE
+	bool
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO
+	default y
+	help
+	  CPUSTC flushes and invalidates OHCI data buffers before DMA and does not
+	  access them while the host controller is active. Do not perform the
+	  generic post-DMA writeback-invalidate, which is not a pure invalidate.
+
 config LA32R_L1_CACHE_SHIFT
 	int
 	default "6" if TARGET_LA32R_LOONGSONSOC_DEMO

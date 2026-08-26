@@ -58,6 +58,12 @@ gmac0: ethernet@0x9ff00000 {
     mac-address = [ 00 98 76 64 32 19 ];/* [>mac 00:98:76:64:32:19 <]*/
 };
 
+ohci0: usb@0x9fe02000 {
+    compatible = "generic-ohci";
+    reg = <0x9fe02000 0x1000>;
+    status = "okay";
+};
+
 nand: nand@1fe0c000 {
 	compatible = "loongson,ls1a-nand";
 	reg = <0x1fe0c000 0x2000>,

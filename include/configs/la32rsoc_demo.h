@@ -32,6 +32,7 @@
 #define CONFIG_SYS_MALLOC_LEN		(256 << 10)
 #define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
 #define CONFIG_SYS_LOAD_ADDR		0x90000000 /* default load address */
+#define CONFIG_SYS_USB_OHCI_MAX_ROOT_PORTS	1
 
 /*----------------------------------------------------------------------
  * Commands

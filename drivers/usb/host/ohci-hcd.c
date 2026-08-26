@@ -1591,8 +1591,12 @@ static int submit_common_msg(ohci_t *ohci, struct usb_device *dev,
 	dev->status = stat;
 	dev->act_len = urb->actual_length;
 
+#if defined(CONFIG_CPUSTC_OHCI_DMA_NO_POST_INVALIDATE)
+	/* The pre-DMA flush is the cache boundary for CPUSTC OHCI data buffers. */
+#else
 	if (usb_pipein(pipe) && dev->status == 0 && dev->act_len)
 		invalidate_dcache_buffer(buffer, dev->act_len);
+#endif
 
 #ifdef DEBUG
 	pkt_print(ohci, urb, dev, pipe, buffer, transfer_len,

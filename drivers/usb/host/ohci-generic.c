@@ -11,8 +11,8 @@
 #include <reset.h>
 #include "ohci.h"
 
-#if !defined(CONFIG_USB_OHCI_NEW)
-# error "Generic OHCI driver requires CONFIG_USB_OHCI_NEW"
+#if !defined(CONFIG_USB_OHCI_HCD) && !defined(CONFIG_USB_OHCI_NEW)
+# error "Generic OHCI driver requires CONFIG_USB_OHCI_HCD"
 #endif
 
 struct generic_ohci {
