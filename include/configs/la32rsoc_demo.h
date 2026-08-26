@@ -56,11 +56,10 @@
 /* -------------------------------------------------
  * Environment
  */
-//Disable persistent environment variable storage
-#define CONFIG_ENV_IS_NOWHERE   1 
-
-
 #define CONFIG_ENV_SIZE		0x4000
+/* Keep the environment after the 48 MiB physical NAND kernel window. */
+#define CONFIG_ENV_OFFSET		0x03000000
+#define CONFIG_ENV_RANGE		0x00200000
 #define CONFIG_EXTRA_ENV_SETTINGS \
     "autoload=no\0" \
     "stdin=serial\0" \
