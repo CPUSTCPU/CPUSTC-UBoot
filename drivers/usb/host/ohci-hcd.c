@@ -120,6 +120,49 @@ static struct pci_device_id ehci_pci_ids[] = {
 #define invalidate_dcache_iso_td(addr) invalidate_dcache_buffer(addr, 32)
 #define invalidate_dcache_hcca(addr) invalidate_dcache_buffer(addr, 256)
 
+#if defined(CONFIG_CPUSTC_OHCI_UNCACHED_DESC)
+static inline void *ohci_desc_uncached(const void *addr)
+{
+	return (void *)(uintptr_t)CACHED_TO_UNCACHED((uintptr_t)addr);
+}
+
+static inline ohci_dev_t *ohci_dev_ptr(ohci_t *ohci, int index)
+{
+	void *addr = index ? (void *)&ohci->int_dev[index - 1] :
+			   (void *)&ohci->ohci_dev;
+
+	return (ohci_dev_t *)ohci_desc_uncached(addr);
+}
+
+/* Shared OHCI descriptors are already uncached; cache ops are unnecessary. */
+#undef flush_dcache_ed
+#undef flush_dcache_td
+#undef flush_dcache_iso_td
+#undef flush_dcache_hcca
+#undef invalidate_dcache_ed
+#undef invalidate_dcache_td
+#undef invalidate_dcache_iso_td
+#undef invalidate_dcache_hcca
+#define flush_dcache_ed(addr) do { } while (0)
+#define flush_dcache_td(addr) do { } while (0)
+#define flush_dcache_iso_td(addr) do { } while (0)
+#define flush_dcache_hcca(addr) do { } while (0)
+#define invalidate_dcache_ed(addr) do { } while (0)
+#define invalidate_dcache_td(addr) do { } while (0)
+#define invalidate_dcache_iso_td(addr) do { } while (0)
+#define invalidate_dcache_hcca(addr) do { } while (0)
+#else
+static inline void *ohci_desc_uncached(const void *addr)
+{
+	return (void *)addr;
+}
+
+static inline ohci_dev_t *ohci_dev_ptr(ohci_t *ohci, int index)
+{
+	return index ? &ohci->int_dev[index - 1] : &ohci->ohci_dev;
+}
+#endif
+
 #if CONFIG_IS_ENABLED(DM_USB)
 /*
  * The various ohci_mdelay(1) calls in the code seem unnecessary. We keep
@@ -1061,10 +1104,17 @@ static void dl_transfer_length(td_t *td)
 /*-------------------------------------------------------------------------*/
 static void check_status(td_t *td_list)
 {
-	urb_priv_t *lurb_priv = td_list->ed->purb;
-	int	   urb_len    = lurb_priv->length;
-	__u32      *phwHeadP  = &td_list->ed->hwHeadP;
+	urb_priv_t *lurb_priv;
+	int	   urb_len;
+	__u32      *phwHeadP;
 	int	   cc;
+
+	if (!td_list->ed)
+		return;
+
+	lurb_priv = td_list->ed->purb;
+	urb_len = lurb_priv->length;
+	phwHeadP = &td_list->ed->hwHeadP;
 
 	cc = TD_CC_GET(m32_swap(td_list->hwINFO));
 	if (cc) {
@@ -1142,6 +1192,8 @@ static int takeback_td(ohci_t *ohci, td_t *td_list)
 	tdINFO = m32_swap(td_list->hwINFO);
 
 	ed = td_list->ed;
+	if (!ed)
+		return -1;
 	lurb_priv = ed->purb;
 
 	dl_transfer_length(td_list);
@@ -1467,19 +1519,23 @@ static ohci_dev_t *ohci_get_ohci_dev(ohci_t *ohci, int devnum, int intr)
 	int i;
 
 	if (!intr)
-		return &ohci->ohci_dev;
+		return ohci_dev_ptr(ohci, 0);
 
 	/* First see if we already have an ohci_dev for this dev. */
 	for (i = 0; i < NUM_INT_DEVS; i++) {
-		if (ohci->int_dev[i].devnum == devnum)
-			return &ohci->int_dev[i];
+		ohci_dev_t *int_dev = ohci_dev_ptr(ohci, i + 1);
+
+		if (int_dev->devnum == devnum)
+			return int_dev;
 	}
 
 	/* If not then find a free one. */
 	for (i = 0; i < NUM_INT_DEVS; i++) {
-		if (ohci->int_dev[i].devnum == -1) {
-			ohci->int_dev[i].devnum = devnum;
-			return &ohci->int_dev[i];
+		ohci_dev_t *int_dev = ohci_dev_ptr(ohci, i + 1);
+
+		if (int_dev->devnum == -1) {
+			int_dev->devnum = devnum;
+			return int_dev;
 		}
 	}
 
@@ -1849,7 +1905,7 @@ static int hc_start(ohci_t *ohci)
 
 	ohci->disabled = 1;
 	for (i = 0; i < NUM_INT_DEVS; i++)
-		ohci->int_dev[i].devnum = -1;
+		ohci_dev_ptr(ohci, i + 1)->devnum = -1;
 
 	/* Tell the controller where the control and bulk lists are
 	 * The lists are empty now. */
@@ -2027,7 +2083,8 @@ int usb_lowlevel_init(int index, enum usb_init_type init, void **controller)
 		err("HCCA not aligned!!");
 		return -1;
 	}
-	gohci.hcca = &ghcca[0];
+	gohci.hcca_alloc = &ghcca[0];
+	gohci.hcca = (struct ohci_hcca *)ohci_desc_uncached(gohci.hcca_alloc);
 	info("aligned ghcca %p", gohci.hcca);
 	memset(gohci.hcca, 0, sizeof(struct ohci_hcca));
 
@@ -2196,9 +2253,10 @@ int ohci_register(struct udevice *dev, struct ohci_regs *regs)
 	priv->desc_before_addr = true;
 
 	ohci->regs = regs;
-	ohci->hcca = memalign(256, sizeof(struct ohci_hcca));
-	if (!ohci->hcca)
+	ohci->hcca_alloc = memalign(256, sizeof(struct ohci_hcca));
+	if (!ohci->hcca_alloc)
 		return -ENOMEM;
+	ohci->hcca = (struct ohci_hcca *)ohci_desc_uncached(ohci->hcca_alloc);
 	memset(ohci->hcca, 0, sizeof(struct ohci_hcca));
 	flush_dcache_hcca(ohci->hcca);
 
@@ -2221,7 +2279,9 @@ int ohci_deregister(struct udevice *dev)
 	if (hc_reset(ohci) < 0)
 		return -EIO;
 
-	free(ohci->hcca);
+	free(ohci->hcca_alloc);
+	ohci->hcca = NULL;
+	ohci->hcca_alloc = NULL;
 
 	return 0;
 }

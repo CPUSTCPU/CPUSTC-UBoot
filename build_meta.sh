@@ -47,7 +47,13 @@ make O="${CPUSTC_BUILD_DIR}" -j8
 ${CROSS_COMPILE}objdump -lS "${CPUSTC_BUILD_DIR}/u-boot" > "${CPUSTC_BUILD_DIR}/u-boot.S"
 ${CROSS_COMPILE}objdump -dS "${CPUSTC_BUILD_DIR}/u-boot" > "${CPUSTC_BUILD_DIR}/u-boot.s"
 cp "${CPUSTC_BUILD_DIR}/u-boot.bin" "${CPUSTC_BUILD_DIR}/${CPUSTC_ARTIFACT}"
-CPUSTC_PUBLISHED_ARTIFACT="${CPUSTC_ARTIFACT%.bin}-$(date '+%Y%m%d_%H%M%S').bin"
+# Keep the published copy easy to address from board tooling.  The build
+# directory artifact above retains the full profile/frequency/revision data.
+CPUSTC_PUBLISHED_ARTIFACT="u-boot-${CPUSTC_CACHE_PROFILE}-$(date '+%Y%m%d_%H%M%S').bin"
+if [ "${#CPUSTC_PUBLISHED_ARTIFACT}" -gt 30 ]; then
+	echo "CPUSTC published artifact name exceeds 30 characters: ${CPUSTC_PUBLISHED_ARTIFACT}" >&2
+	exit 2
+fi
 mkdir -p "${CPUSTC_PUBLISH_DIR}"
 cp "${CPUSTC_BUILD_DIR}/${CPUSTC_ARTIFACT}" \
 	"${CPUSTC_PUBLISH_DIR}/${CPUSTC_PUBLISHED_ARTIFACT}"

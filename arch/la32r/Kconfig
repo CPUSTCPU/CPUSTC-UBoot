@@ -33,6 +33,15 @@ config CPUSTC_OHCI_DMA_NO_POST_INVALIDATE
 	  access them while the host controller is active. Do not perform the
 	  generic post-DMA writeback-invalidate, which is not a pure invalidate.
 
+config CPUSTC_OHCI_UNCACHED_DESC
+	bool
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO
+	default y
+	help
+	  Access OHCI HCCA, ED, and TD structures through the uncached direct-map
+	  alias. These structures are shared between the CPU and the host
+	  controller and must not be read through a stale cached alias.
+
 config LA32R_L1_CACHE_SHIFT
 	int
 	default "6" if TARGET_LA32R_LOONGSONSOC_DEMO

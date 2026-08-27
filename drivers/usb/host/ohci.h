@@ -385,6 +385,7 @@ typedef struct ohci {
 	struct ohci_device ohci_dev __aligned(TD_ALIGNMENT);
 	struct ohci_device int_dev[NUM_INT_DEVS] __aligned(TD_ALIGNMENT);
 	struct ohci_hcca *hcca;		/* hcca */
+	struct ohci_hcca *hcca_alloc;	/* original allocation for free() */
 	/*dma_addr_t hcca_dma;*/
 
 	int irq;
