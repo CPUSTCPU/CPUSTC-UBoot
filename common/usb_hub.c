@@ -43,6 +43,16 @@
 #define HUB_SHORT_RESET_TIME	20
 #define HUB_LONG_RESET_TIME	200
 
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+#define USB_ENUM_TRIES		4
+#define USB_CONNECT_POLL_MS	20
+#define USB_CONNECT_STABLE_MS	100
+#define USB_CONNECT_TIMEOUT_MS	2000
+#define USB_RESET_RECOVERY_MS	10
+#else
+#define USB_ENUM_TRIES		1
+#endif
+
 #define PORT_OVERCURRENT_MAX_SCAN_COUNT		3
 
 struct usb_device_scan {
@@ -233,6 +243,37 @@ static struct usb_hub_device *usb_hub_allocate(void)
 
 #define MAX_TRIES 5
 
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+static int usb_hub_wait_port_connection(struct usb_device *dev, int port)
+{
+	ALLOC_CACHE_ALIGN_BUFFER(struct usb_port_status, portsts, 1);
+	unsigned int elapsed = 0;
+	unsigned int stable = 0;
+
+	while (elapsed < USB_CONNECT_TIMEOUT_MS) {
+		unsigned short status;
+
+		if (usb_get_port_status(dev, port + 1, portsts) < 0) {
+			stable = 0;
+		} else {
+			status = le16_to_cpu(portsts->wPortStatus);
+			if (status & USB_PORT_STAT_CONNECTION) {
+				stable += USB_CONNECT_POLL_MS;
+				if (stable >= USB_CONNECT_STABLE_MS)
+					return 0;
+			} else {
+				stable = 0;
+			}
+		}
+
+		mdelay(USB_CONNECT_POLL_MS);
+		elapsed += USB_CONNECT_POLL_MS;
+	}
+
+	return -ENOTCONN;
+}
+#endif
+
 static inline const char *portspeed(int portstatus)
 {
 	switch (portstatus & USB_PORT_STAT_SPEED_MASK) {
@@ -264,6 +305,12 @@ static int usb_hub_port_reset(struct usb_device *dev, int port,
 	ALLOC_CACHE_ALIGN_BUFFER(struct usb_port_status, portsts, 1);
 	unsigned short portstatus, portchange;
 	int delay = HUB_SHORT_RESET_TIME; /* start with short reset delay */
+
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+	err = usb_hub_wait_port_connection(dev, port);
+	if (err)
+		return err;
+#endif
 
 #if CONFIG_IS_ENABLED(DM_USB)
 	debug("%s: resetting '%s' port %d...\n", __func__, dev->dev->name,
@@ -312,7 +359,16 @@ static int usb_hub_port_reset(struct usb_device *dev, int port,
 		 * back after another reset or two.
 		 */
 
-		if (portstatus & USB_PORT_STAT_ENABLE)
+		if (
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+		    (portstatus & (USB_PORT_STAT_CONNECTION |
+				   USB_PORT_STAT_ENABLE |
+				   USB_PORT_STAT_RESET)) ==
+		    (USB_PORT_STAT_CONNECTION | USB_PORT_STAT_ENABLE)
+#else
+		    portstatus & USB_PORT_STAT_ENABLE
+#endif
+		   )
 			break;
 
 		/* Switch to long reset delay for the next round */
@@ -327,9 +383,20 @@ static int usb_hub_port_reset(struct usb_device *dev, int port,
 	}
 
 	usb_clear_port_feature(dev, port + 1, USB_PORT_FEAT_C_RESET);
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+	mdelay(USB_RESET_RECOVERY_MS);
+#endif
 	*portstat = portstatus;
 	return 0;
 }
+
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+int usb_hub_reset_port(struct usb_device *dev, int port,
+		       unsigned short *portstat)
+{
+	return usb_hub_port_reset(dev, port, portstat);
+}
+#endif
 
 int usb_hub_port_connect_change(struct usb_device *dev, int port)
 {
@@ -388,8 +455,21 @@ int usb_hub_port_connect_change(struct usb_device *dev, int port)
 
 #if CONFIG_IS_ENABLED(DM_USB)
 	struct udevice *child;
+	int attempt;
 
-	ret = usb_scan_device(dev->dev, port + 1, speed, &child);
+	for (attempt = 0; attempt < USB_ENUM_TRIES; attempt++) {
+		ret = usb_scan_device(dev->dev, port + 1, speed, &child);
+		if (!ret || attempt + 1 == USB_ENUM_TRIES)
+			break;
+
+		printf("USB port %d init attempt %d/%d failed (%d), "
+		       "resetting and retrying\n", port + 1, attempt + 1,
+		       USB_ENUM_TRIES, ret);
+		ret = usb_hub_port_reset(dev, port, &portstatus);
+		if (ret < 0)
+			break;
+		mdelay(100);
+	}
 #else
 	struct usb_device *usb;
 

@@ -74,6 +74,34 @@ CPU 定时器频率默认 50 MHz，可在执行前设置：
 CPUSTC_CPU_FREQ_HZ=60000000 ./build_meta.sh
 ```
 
+## U-Boot 环境
+
+源码默认环境定义在 `include/configs/la32rsoc_demo.h`。NAND 中存在有效环境时，
+其值会覆盖源码默认值。
+
+查看和临时设置变量：
+
+```text
+printenv bootcmd
+setenv name value
+```
+
+将当前环境保存到 NAND：
+
+```text
+saveenv
+```
+
+仅用源码默认值恢复 `bootcmd`，或恢复全部默认环境：
+
+```text
+env default bootcmd
+env default -a
+```
+
+恢复后执行 `saveenv` 才会写入 NAND。本板的 U-Boot `reset` 未实现；需要重新启动时
+使用物理复位、重新上电或重新下载 FPGA bitstream。
+
 ## Linux 启动
 
 SD 卡：

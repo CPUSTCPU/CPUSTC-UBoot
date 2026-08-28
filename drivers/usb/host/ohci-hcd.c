@@ -1565,6 +1565,78 @@ static urb_priv_t *ohci_alloc_urb(struct usb_device *dev, unsigned long pipe,
 	return urb;
 }
 
+#if defined(CONFIG_CPUSTC_OHCI_CONTROL_TRACE)
+static const char *ohci_control_td_phase(const urb_priv_t *urb, int index)
+{
+	if (index == 0)
+		return "setup";
+	if (index == urb->length - 1)
+		return "status";
+	return "data";
+}
+
+static const char *ohci_td_direction(u32 info)
+{
+	switch (info & TD_DP) {
+	case TD_DP_SETUP:
+		return "SETUP";
+	case TD_DP_IN:
+		return "IN";
+	case TD_DP_OUT:
+		return "OUT";
+	default:
+		return "?";
+	}
+}
+
+static void ohci_trace_control_failure(ohci_t *ohci, urb_priv_t *urb,
+				       const struct devrequest *setup, int stat)
+{
+	ed_t *ed = urb->ed;
+	u32 ed_info, ed_head, ed_tail;
+	u32 hcca_done;
+	int i;
+
+	invalidate_dcache_ed(ed);
+	invalidate_dcache_hcca(ohci->hcca);
+	ed_info = m32_swap(ed->hwINFO);
+	ed_head = m32_swap(ed->hwHeadP);
+	ed_tail = m32_swap(ed->hwTailP);
+	hcca_done = m32_swap(ohci->hcca->done_head);
+
+	printf("OHCI-CTL-FAIL dev=%d speed=%d stat=%#x act=%d "
+	       "req=%02x/%02x value=%04x index=%04x len=%u\n",
+	       urb->dev->devnum, urb->dev->speed, stat, urb->actual_length,
+	       setup->requesttype, setup->request, le16_to_cpu(setup->value),
+	       le16_to_cpu(setup->index), le16_to_cpu(setup->length));
+	printf("OHCI-CTL-REG control=%08x cmd=%08x intr=%08x frame=%08x "
+	       "done=%08x hcca_done=%08x port0=%08x\n",
+	       ohci_readl(&ohci->regs->control),
+	       ohci_readl(&ohci->regs->cmdstatus),
+	       ohci_readl(&ohci->regs->intrstatus),
+	       ohci_readl(&ohci->regs->fmnumber),
+	       ohci_readl(&ohci->regs->donehead), hcca_done,
+	       roothub_portstatus(ohci, 0));
+	printf("OHCI-CTL-ED info=%08x head=%08x tail=%08x current=%08x\n",
+	       ed_info, ed_head, ed_tail,
+	       ohci_readl(&ohci->regs->ed_controlcurrent));
+
+	for (i = 0; i < urb->length; i++) {
+		td_t *td = urb->td[i];
+		u32 info;
+
+		invalidate_dcache_td(td);
+		info = m32_swap(td->hwINFO);
+		printf("OHCI-CTL-TD%d phase=%s dp=%s cc=%x ec=%u info=%08x "
+		       "cbp=%08x next=%08x be=%08x\n",
+		       i, ohci_control_td_phase(urb, i),
+		       ohci_td_direction(info), TD_CC_GET(info),
+		       (info & TD_EC) >> 26, info, m32_swap(td->hwCBP),
+		       m32_swap(td->hwNextTD), m32_swap(td->hwBE));
+	}
+}
+#endif
+
 static int submit_common_msg(ohci_t *ohci, struct usb_device *dev,
 		unsigned long pipe, void *buffer, int transfer_len,
 		struct devrequest *setup, int interval)
@@ -1646,6 +1718,11 @@ static int submit_common_msg(ohci_t *ohci, struct usb_device *dev,
 
 	dev->status = stat;
 	dev->act_len = urb->actual_length;
+
+#if defined(CONFIG_CPUSTC_OHCI_CONTROL_TRACE)
+	if (usb_pipecontrol(pipe) && stat)
+		ohci_trace_control_failure(ohci, urb, setup, stat);
+#endif
 
 #if defined(CONFIG_CPUSTC_OHCI_DMA_NO_POST_INVALIDATE)
 	/* The pre-DMA flush is the cache boundary for CPUSTC OHCI data buffers. */
