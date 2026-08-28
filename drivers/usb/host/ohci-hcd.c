@@ -2295,6 +2295,14 @@ static int ohci_submit_int_msg(struct udevice *dev, struct usb_device *udev,
 				 NULL, interval);
 }
 
+static int ohci_get_max_xfer_size(struct udevice *dev, size_t *size)
+{
+	/* Match Linux usb-storage's default while staying within 30 OHCI TDs. */
+	*size = 120 * 1024;
+
+	return 0;
+}
+
 static struct int_queue *ohci_create_int_queue(struct udevice *dev,
 		struct usb_device *udev, unsigned long pipe, int queuesize,
 		int elementsize, void *buffer, int interval)
@@ -2370,6 +2378,7 @@ struct dm_usb_ops ohci_usb_ops = {
 	.create_int_queue = ohci_create_int_queue,
 	.poll_int_queue = ohci_poll_int_queue,
 	.destroy_int_queue = ohci_destroy_int_queue,
+	.get_max_xfer_size = ohci_get_max_xfer_size,
 };
 
 #endif
