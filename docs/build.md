@@ -113,7 +113,7 @@ U 盘使用两个 ext4 分区：第一个分区为 512 MiB，根目录存放 `vm
 usb start
 part list usb 0
 ext4ls usb 0:1 /
-ext4ls usb 0:2 /sbin/init
+ext4size usb 0:2 /sbin/init
 ```
 
 手动启动：
