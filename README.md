@@ -2,15 +2,16 @@
 
 [中文](README.md) | [English](README.en.md)
 
-CPUSTC LoongArch32 U-Boot，面向 CPUSTC-SoC FPGA 板，提供 SD 卡、网络、NAND
-与 Linux ELF 加载支持。仓库保留 U-Boot 上游目录和许可证结构。
+CPUSTC LoongArch32 U-Boot，面向 CPUSTC-SoC FPGA 板，默认从 USB 加载 Linux
+ELF 和独立根文件系统，并提供 NAND 回退及 SD 卡、网络手动加载支持。仓库保留
+U-Boot 上游目录和许可证结构。
 
 ## Pipeline
 
 ```text
 CPUSTC-SoC / DDR / 外设
         -> U-Boot LA32R 初始化
-        -> SD 卡或 TFTP 加载 vmlinux
+        -> USB 加载 vmlinux，NAND 回退
         -> bootelf
         -> CPUSTC-Linux / Buildroot
 ```

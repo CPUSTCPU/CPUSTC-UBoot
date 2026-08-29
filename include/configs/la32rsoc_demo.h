@@ -62,8 +62,10 @@
 #define CONFIG_ENV_OFFSET		0x03000000
 #define CONFIG_ENV_RANGE		0x00200000
 #define CPUSTC_BOOTCOMMAND \
-    "usb start; if ext4load usb 0:1 0xa3000000 /vmlinux; " \
-    "then usb stop; bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init; " \
+    "usb start; if ext4load usb 0:1 0xa3000000 /vmlinux && " \
+    "ext4ls usb 0:2 /sbin/init; then usb stop; " \
+    "bootelf 0xa3000000 console=ttyS0,115200 root=/dev/sda2 " \
+    "rootwait rw rootfstype=ext4; " \
     "else usb stop; nand read 0xa3000000 0 0x2800000 && " \
     "bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init; fi"
 #define CONFIG_EXTRA_ENV_SETTINGS \

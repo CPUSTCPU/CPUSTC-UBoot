@@ -106,12 +106,14 @@ env default -a
 
 USB：
 
-将 `vmlinux` 放在 U 盘第一个 ext4 分区的根目录。可先检查分区和文件：
+U 盘使用两个 ext4 分区：第一个分区为 512 MiB，根目录存放 `vmlinux`；
+第二个分区使用剩余空间并存放根文件系统。可先检查分区和关键文件：
 
 ```text
 usb start
 part list usb 0
 ext4ls usb 0:1 /
+ext4ls usb 0:2 /sbin/init
 ```
 
 手动启动：
@@ -119,10 +121,12 @@ ext4ls usb 0:1 /
 ```text
 ext4load usb 0:1 0xa3000000 /vmlinux
 usb stop
-bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init
+bootelf 0xa3000000 console=ttyS0,115200 root=/dev/sda2 rootwait rw rootfstype=ext4
 ```
 
-默认 `bootcmd` 会自动执行上述 USB 启动流程；USB 读取失败时回退到 NAND。
+默认 `bootcmd` 会自动执行上述 USB 启动流程；`vmlinux` 读取失败或第二分区
+缺少 `/sbin/init` 时回退到 NAND。NAND 中的旧 `vmlinux` 仍通过内嵌 rootfs
+和 `rdinit=/init` 启动。
 
 ### USB 读取测试
 

@@ -3,15 +3,16 @@
 [中文](README.md) | English
 
 LoongArch32 U-Boot for the CPUSTC-SoC FPGA board. It initializes the board,
-loads Linux from SD or TFTP, and starts the image with `bootelf`. The upstream
-U-Boot directory and licensing structure are retained.
+loads Linux and its separate root filesystem from USB by default, and falls
+back to the embedded-rootfs image in NAND. Manual SD and TFTP loading remain
+available. The upstream U-Boot directory and licensing structure are retained.
 
 ## Pipeline
 
 ```text
 CPUSTC-SoC / DDR / peripherals
         -> U-Boot LA32R initialization
-        -> vmlinux from SD or TFTP
+        -> vmlinux from USB, with NAND fallback
         -> bootelf
         -> CPUSTC-Linux / Buildroot
 ```
