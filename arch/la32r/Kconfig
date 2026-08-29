@@ -24,6 +24,43 @@ config CPUSTC_L2_CACHE
 	  Enable selector-2 CACOP maintenance for CPUSTCore implementations
 	  with the unified L2 cache. Disable this for L1-only CPUSTCore builds.
 
+config CPUSTC_OHCI_DMA_NO_POST_INVALIDATE
+	bool
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO
+	default y
+	help
+	  CPUSTC flushes and invalidates OHCI data buffers before DMA and does not
+	  access them while the host controller is active. Do not perform the
+	  generic post-DMA writeback-invalidate, which is not a pure invalidate.
+
+config CPUSTC_OHCI_UNCACHED_DESC
+	bool
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO
+	default y
+	help
+	  Access OHCI HCCA, ED, and TD structures through the uncached direct-map
+	  alias. These structures are shared between the CPU and the host
+	  controller and must not be read through a stale cached alias.
+
+config CPUSTC_OHCI_CONTROL_TRACE
+	bool "Trace failed CPUSTC OHCI control transfers"
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO && USB_OHCI_HCD
+	help
+	  Print the setup packet, TD completion state, endpoint descriptor, and
+	  controller/port registers when an OHCI control transfer fails. This is
+	  intended for bounded board diagnostics and remains silent on successful
+	  transfers.
+
+config CPUSTC_USB_ENUM_RETRY
+	bool "Recover CPUSTC USB enumeration after descriptor errors"
+	depends on TARGET_LA32R_LOONGSONSOC_DEMO && DM_USB
+	help
+	  Retry the initial device descriptor request, wait for a stable reconnect,
+	  perform a complete root-port reset, and rebuild the temporary USB device
+	  across multiple port-initialization attempts. This recovery is intended
+	  for full-speed devices which temporarily disconnect while preparing their
+	  initial descriptor.
+
 config LA32R_L1_CACHE_SHIFT
 	int
 	default "6" if TARGET_LA32R_LOONGSONSOC_DEMO

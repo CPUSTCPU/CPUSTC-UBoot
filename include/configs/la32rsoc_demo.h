@@ -32,6 +32,7 @@
 #define CONFIG_SYS_MALLOC_LEN		(256 << 10)
 #define CONFIG_SYS_MONITOR_BASE		CONFIG_SYS_TEXT_BASE
 #define CONFIG_SYS_LOAD_ADDR		0x90000000 /* default load address */
+#define CONFIG_SYS_USB_OHCI_MAX_ROOT_PORTS	1
 
 /*----------------------------------------------------------------------
  * Commands
@@ -56,12 +57,17 @@
 /* -------------------------------------------------
  * Environment
  */
-//Disable persistent environment variable storage
-#define CONFIG_ENV_IS_NOWHERE   1 
-
-
 #define CONFIG_ENV_SIZE		0x4000
+/* Keep the environment after the 48 MiB physical NAND kernel window. */
+#define CONFIG_ENV_OFFSET		0x03000000
+#define CONFIG_ENV_RANGE		0x00200000
+#define CPUSTC_BOOTCOMMAND \
+    "usb start; if ext4load usb 0:1 0xa3000000 /vmlinux; " \
+    "then usb stop; bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init; " \
+    "else usb stop; nand read 0xa3000000 0 0x2800000 && " \
+    "bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init; fi"
 #define CONFIG_EXTRA_ENV_SETTINGS \
+    "bootcmd=" CPUSTC_BOOTCOMMAND "\0" \
     "autoload=no\0" \
     "stdin=serial\0" \
     "stdout=serial\0" \

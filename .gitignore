@@ -47,7 +47,10 @@ fit-dtb.blob*
 /mkimage-in-simple-bin*
 /simple-bin*
 /u-boot*
+/*.jou
 /*.log
+/*.rpt
+/*.str
 
 #
 # git files that we don't want to ignore even it they are dot-files

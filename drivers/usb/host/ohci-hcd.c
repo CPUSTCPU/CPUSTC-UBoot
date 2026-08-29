@@ -120,6 +120,49 @@ static struct pci_device_id ehci_pci_ids[] = {
 #define invalidate_dcache_iso_td(addr) invalidate_dcache_buffer(addr, 32)
 #define invalidate_dcache_hcca(addr) invalidate_dcache_buffer(addr, 256)
 
+#if defined(CONFIG_CPUSTC_OHCI_UNCACHED_DESC)
+static inline void *ohci_desc_uncached(const void *addr)
+{
+	return (void *)(uintptr_t)CACHED_TO_UNCACHED((uintptr_t)addr);
+}
+
+static inline ohci_dev_t *ohci_dev_ptr(ohci_t *ohci, int index)
+{
+	void *addr = index ? (void *)&ohci->int_dev[index - 1] :
+			   (void *)&ohci->ohci_dev;
+
+	return (ohci_dev_t *)ohci_desc_uncached(addr);
+}
+
+/* Shared OHCI descriptors are already uncached; cache ops are unnecessary. */
+#undef flush_dcache_ed
+#undef flush_dcache_td
+#undef flush_dcache_iso_td
+#undef flush_dcache_hcca
+#undef invalidate_dcache_ed
+#undef invalidate_dcache_td
+#undef invalidate_dcache_iso_td
+#undef invalidate_dcache_hcca
+#define flush_dcache_ed(addr) do { } while (0)
+#define flush_dcache_td(addr) do { } while (0)
+#define flush_dcache_iso_td(addr) do { } while (0)
+#define flush_dcache_hcca(addr) do { } while (0)
+#define invalidate_dcache_ed(addr) do { } while (0)
+#define invalidate_dcache_td(addr) do { } while (0)
+#define invalidate_dcache_iso_td(addr) do { } while (0)
+#define invalidate_dcache_hcca(addr) do { } while (0)
+#else
+static inline void *ohci_desc_uncached(const void *addr)
+{
+	return (void *)addr;
+}
+
+static inline ohci_dev_t *ohci_dev_ptr(ohci_t *ohci, int index)
+{
+	return index ? &ohci->int_dev[index - 1] : &ohci->ohci_dev;
+}
+#endif
+
 #if CONFIG_IS_ENABLED(DM_USB)
 /*
  * The various ohci_mdelay(1) calls in the code seem unnecessary. We keep
@@ -1061,10 +1104,17 @@ static void dl_transfer_length(td_t *td)
 /*-------------------------------------------------------------------------*/
 static void check_status(td_t *td_list)
 {
-	urb_priv_t *lurb_priv = td_list->ed->purb;
-	int	   urb_len    = lurb_priv->length;
-	__u32      *phwHeadP  = &td_list->ed->hwHeadP;
+	urb_priv_t *lurb_priv;
+	int	   urb_len;
+	__u32      *phwHeadP;
 	int	   cc;
+
+	if (!td_list->ed)
+		return;
+
+	lurb_priv = td_list->ed->purb;
+	urb_len = lurb_priv->length;
+	phwHeadP = &td_list->ed->hwHeadP;
 
 	cc = TD_CC_GET(m32_swap(td_list->hwINFO));
 	if (cc) {
@@ -1142,6 +1192,8 @@ static int takeback_td(ohci_t *ohci, td_t *td_list)
 	tdINFO = m32_swap(td_list->hwINFO);
 
 	ed = td_list->ed;
+	if (!ed)
+		return -1;
 	lurb_priv = ed->purb;
 
 	dl_transfer_length(td_list);
@@ -1467,19 +1519,23 @@ static ohci_dev_t *ohci_get_ohci_dev(ohci_t *ohci, int devnum, int intr)
 	int i;
 
 	if (!intr)
-		return &ohci->ohci_dev;
+		return ohci_dev_ptr(ohci, 0);
 
 	/* First see if we already have an ohci_dev for this dev. */
 	for (i = 0; i < NUM_INT_DEVS; i++) {
-		if (ohci->int_dev[i].devnum == devnum)
-			return &ohci->int_dev[i];
+		ohci_dev_t *int_dev = ohci_dev_ptr(ohci, i + 1);
+
+		if (int_dev->devnum == devnum)
+			return int_dev;
 	}
 
 	/* If not then find a free one. */
 	for (i = 0; i < NUM_INT_DEVS; i++) {
-		if (ohci->int_dev[i].devnum == -1) {
-			ohci->int_dev[i].devnum = devnum;
-			return &ohci->int_dev[i];
+		ohci_dev_t *int_dev = ohci_dev_ptr(ohci, i + 1);
+
+		if (int_dev->devnum == -1) {
+			int_dev->devnum = devnum;
+			return int_dev;
 		}
 	}
 
@@ -1508,6 +1564,78 @@ static urb_priv_t *ohci_alloc_urb(struct usb_device *dev, unsigned long pipe,
 
 	return urb;
 }
+
+#if defined(CONFIG_CPUSTC_OHCI_CONTROL_TRACE)
+static const char *ohci_control_td_phase(const urb_priv_t *urb, int index)
+{
+	if (index == 0)
+		return "setup";
+	if (index == urb->length - 1)
+		return "status";
+	return "data";
+}
+
+static const char *ohci_td_direction(u32 info)
+{
+	switch (info & TD_DP) {
+	case TD_DP_SETUP:
+		return "SETUP";
+	case TD_DP_IN:
+		return "IN";
+	case TD_DP_OUT:
+		return "OUT";
+	default:
+		return "?";
+	}
+}
+
+static void ohci_trace_control_failure(ohci_t *ohci, urb_priv_t *urb,
+				       const struct devrequest *setup, int stat)
+{
+	ed_t *ed = urb->ed;
+	u32 ed_info, ed_head, ed_tail;
+	u32 hcca_done;
+	int i;
+
+	invalidate_dcache_ed(ed);
+	invalidate_dcache_hcca(ohci->hcca);
+	ed_info = m32_swap(ed->hwINFO);
+	ed_head = m32_swap(ed->hwHeadP);
+	ed_tail = m32_swap(ed->hwTailP);
+	hcca_done = m32_swap(ohci->hcca->done_head);
+
+	printf("OHCI-CTL-FAIL dev=%d speed=%d stat=%#x act=%d "
+	       "req=%02x/%02x value=%04x index=%04x len=%u\n",
+	       urb->dev->devnum, urb->dev->speed, stat, urb->actual_length,
+	       setup->requesttype, setup->request, le16_to_cpu(setup->value),
+	       le16_to_cpu(setup->index), le16_to_cpu(setup->length));
+	printf("OHCI-CTL-REG control=%08x cmd=%08x intr=%08x frame=%08x "
+	       "done=%08x hcca_done=%08x port0=%08x\n",
+	       ohci_readl(&ohci->regs->control),
+	       ohci_readl(&ohci->regs->cmdstatus),
+	       ohci_readl(&ohci->regs->intrstatus),
+	       ohci_readl(&ohci->regs->fmnumber),
+	       ohci_readl(&ohci->regs->donehead), hcca_done,
+	       roothub_portstatus(ohci, 0));
+	printf("OHCI-CTL-ED info=%08x head=%08x tail=%08x current=%08x\n",
+	       ed_info, ed_head, ed_tail,
+	       ohci_readl(&ohci->regs->ed_controlcurrent));
+
+	for (i = 0; i < urb->length; i++) {
+		td_t *td = urb->td[i];
+		u32 info;
+
+		invalidate_dcache_td(td);
+		info = m32_swap(td->hwINFO);
+		printf("OHCI-CTL-TD%d phase=%s dp=%s cc=%x ec=%u info=%08x "
+		       "cbp=%08x next=%08x be=%08x\n",
+		       i, ohci_control_td_phase(urb, i),
+		       ohci_td_direction(info), TD_CC_GET(info),
+		       (info & TD_EC) >> 26, info, m32_swap(td->hwCBP),
+		       m32_swap(td->hwNextTD), m32_swap(td->hwBE));
+	}
+}
+#endif
 
 static int submit_common_msg(ohci_t *ohci, struct usb_device *dev,
 		unsigned long pipe, void *buffer, int transfer_len,
@@ -1591,8 +1719,17 @@ static int submit_common_msg(ohci_t *ohci, struct usb_device *dev,
 	dev->status = stat;
 	dev->act_len = urb->actual_length;
 
+#if defined(CONFIG_CPUSTC_OHCI_CONTROL_TRACE)
+	if (usb_pipecontrol(pipe) && stat)
+		ohci_trace_control_failure(ohci, urb, setup, stat);
+#endif
+
+#if defined(CONFIG_CPUSTC_OHCI_DMA_NO_POST_INVALIDATE)
+	/* The pre-DMA flush is the cache boundary for CPUSTC OHCI data buffers. */
+#else
 	if (usb_pipein(pipe) && dev->status == 0 && dev->act_len)
 		invalidate_dcache_buffer(buffer, dev->act_len);
+#endif
 
 #ifdef DEBUG
 	pkt_print(ohci, urb, dev, pipe, buffer, transfer_len,
@@ -1845,7 +1982,7 @@ static int hc_start(ohci_t *ohci)
 
 	ohci->disabled = 1;
 	for (i = 0; i < NUM_INT_DEVS; i++)
-		ohci->int_dev[i].devnum = -1;
+		ohci_dev_ptr(ohci, i + 1)->devnum = -1;
 
 	/* Tell the controller where the control and bulk lists are
 	 * The lists are empty now. */
@@ -2023,7 +2160,8 @@ int usb_lowlevel_init(int index, enum usb_init_type init, void **controller)
 		err("HCCA not aligned!!");
 		return -1;
 	}
-	gohci.hcca = &ghcca[0];
+	gohci.hcca_alloc = &ghcca[0];
+	gohci.hcca = (struct ohci_hcca *)ohci_desc_uncached(gohci.hcca_alloc);
 	info("aligned ghcca %p", gohci.hcca);
 	memset(gohci.hcca, 0, sizeof(struct ohci_hcca));
 
@@ -2157,6 +2295,14 @@ static int ohci_submit_int_msg(struct udevice *dev, struct usb_device *udev,
 				 NULL, interval);
 }
 
+static int ohci_get_max_xfer_size(struct udevice *dev, size_t *size)
+{
+	/* Match Linux usb-storage's default while staying within 30 OHCI TDs. */
+	*size = 120 * 1024;
+
+	return 0;
+}
+
 static struct int_queue *ohci_create_int_queue(struct udevice *dev,
 		struct usb_device *udev, unsigned long pipe, int queuesize,
 		int elementsize, void *buffer, int interval)
@@ -2192,9 +2338,10 @@ int ohci_register(struct udevice *dev, struct ohci_regs *regs)
 	priv->desc_before_addr = true;
 
 	ohci->regs = regs;
-	ohci->hcca = memalign(256, sizeof(struct ohci_hcca));
-	if (!ohci->hcca)
+	ohci->hcca_alloc = memalign(256, sizeof(struct ohci_hcca));
+	if (!ohci->hcca_alloc)
 		return -ENOMEM;
+	ohci->hcca = (struct ohci_hcca *)ohci_desc_uncached(ohci->hcca_alloc);
 	memset(ohci->hcca, 0, sizeof(struct ohci_hcca));
 	flush_dcache_hcca(ohci->hcca);
 
@@ -2217,7 +2364,9 @@ int ohci_deregister(struct udevice *dev)
 	if (hc_reset(ohci) < 0)
 		return -EIO;
 
-	free(ohci->hcca);
+	free(ohci->hcca_alloc);
+	ohci->hcca = NULL;
+	ohci->hcca_alloc = NULL;
 
 	return 0;
 }
@@ -2229,6 +2378,7 @@ struct dm_usb_ops ohci_usb_ops = {
 	.create_int_queue = ohci_create_int_queue,
 	.poll_int_queue = ohci_poll_int_queue,
 	.destroy_int_queue = ohci_destroy_int_queue,
+	.get_max_xfer_size = ohci_get_max_xfer_size,
 };
 
 #endif

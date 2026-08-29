@@ -39,6 +39,12 @@
 
 #define USB_BUFSIZ	512
 
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+#define USB_GET_MAXPACKET0_TRIES	3
+#else
+#define USB_GET_MAXPACKET0_TRIES	1
+#endif
+
 static int asynch_allowed;
 char usb_started; /* flag for the started/stopped USB status */
 
@@ -910,6 +916,12 @@ __weak int usb_alloc_device(struct usb_device *udev)
 
 static int usb_hub_port_reset(struct usb_device *dev, struct usb_device *hub)
 {
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+	unsigned short portstatus;
+
+	if (hub)
+		return usb_hub_reset_port(hub, dev->portnr - 1, &portstatus);
+#endif
 	if (!hub)
 		usb_reset_root_port(dev);
 
@@ -970,7 +982,7 @@ static int usb_setup_descriptor(struct usb_device *dev, bool do_read)
 	dev->epmaxpacketout[0] = dev->descriptor.bMaxPacketSize0;
 
 	if (do_read && dev->speed == USB_SPEED_FULL) {
-		int err;
+		int attempt, err = -EIO;
 
 		/*
 		 * Validate we've received only at least 8 bytes, not that
@@ -988,7 +1000,17 @@ static int usb_setup_descriptor(struct usb_device *dev, bool do_read)
 		 * A request for 64 bytes of data with the maxpacket guessed
 		 * as 64 (above) yields a request for 1 packet.
 		 */
-		err = get_descriptor_len(dev, 64, 8);
+		for (attempt = 0; attempt < USB_GET_MAXPACKET0_TRIES;
+		     attempt++) {
+			err = get_descriptor_len(dev, 64, 8);
+			if (!err)
+				break;
+			if (attempt + 1 < USB_GET_MAXPACKET0_TRIES) {
+				printf("USB descriptor attempt %d/%d failed, "
+				       "retrying\n", attempt + 1,
+				       USB_GET_MAXPACKET0_TRIES);
+			}
+		}
 		if (err)
 			return err;
 	}

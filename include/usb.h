@@ -175,6 +175,10 @@ int usb_lowlevel_stop(int index);
 
 #if defined(CONFIG_USB_MUSB_HOST) || CONFIG_IS_ENABLED(DM_USB)
 int usb_reset_root_port(struct usb_device *dev);
+#if CONFIG_IS_ENABLED(CPUSTC_USB_ENUM_RETRY)
+int usb_hub_reset_port(struct usb_device *dev, int port,
+		       unsigned short *portstat);
+#endif
 #else
 #define usb_reset_root_port(dev)
 #endif
