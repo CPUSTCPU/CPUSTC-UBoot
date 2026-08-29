@@ -104,6 +104,48 @@ env default -a
 
 ## Linux 启动
 
+USB：
+
+将 `vmlinux` 放在 U 盘第一个 ext4 分区的根目录。可先检查分区和文件：
+
+```text
+usb start
+part list usb 0
+ext4ls usb 0:1 /
+```
+
+手动启动：
+
+```text
+ext4load usb 0:1 0xa3000000 /vmlinux
+usb stop
+bootelf 0xa3000000 console=ttyS0,115200 rdinit=/init
+```
+
+默认 `bootcmd` 会自动执行上述 USB 启动流程；USB 读取失败时回退到 NAND。
+
+### USB 读取测试
+
+测试环境：CPUSTC-SoC L2 配置、50 MHz 定时器、OHCI 1.0，U 盘为
+Kingston DataTraveler 3.0（全速 USB）。测试文件位于第一个 ext4 分区，大小为
+32,990,616 字节。
+
+U-Boot 使用以下命令测试：
+
+```text
+usb start
+ext4load usb 0:1 0xa3000000 /vmlinux
+```
+
+| 环境 | 用时 | 读取速度 |
+| --- | ---: | ---: |
+| U-Boot，默认 10 KiB READ10 | 118.386 s | 271.5 KiB/s |
+| U-Boot，120 KiB READ10 | 38.665 s | 833.2 KiB/s |
+| Linux 5.14，`dd bs=1M iflag=direct` 三次平均 | 36.097 s | 892.5 KiB/s |
+
+120 KiB READ10 使 U-Boot 读取速度提升约 3.06 倍，达到 Linux 对照结果的
+93.4%。已验证可启动到登录界面。当前已设置为最大 120 KiB READ10。
+
 SD 卡：
 
 ```text
